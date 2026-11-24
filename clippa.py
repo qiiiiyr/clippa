@@ -18,6 +18,8 @@ import anthropic
 import requests
 import yt_dlp
 
+import dashboard
+
 ROOT = Path(__file__).resolve().parent
 DATA, OUT = ROOT / "data", ROOT / "out"
 env = os.environ.get
@@ -334,6 +336,7 @@ def main():
         made += record["keep"]
         if not DRY_RUN:
             save(DATA / "seen.json", done)
+    dashboard.write(DATA, ROOT / "docs" / "index.html")
     print(f"{made} clip(s) {'rendered (dry run, nothing uploaded)' if DRY_RUN else 'posted'}; see out/")
 
 

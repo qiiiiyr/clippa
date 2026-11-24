@@ -68,6 +68,9 @@ passes, uploads are private only, so start with YouTube.
 6. **Go live:** remove `PRIVACY` (or set `public`) and set the variable `POSTING=on`. The daily run then posts. Delete
    `POSTING` or set it to `off` to pause. `data/seen.json` remembers clipped moments so nothing is posted twice.
 
+7. **Dashboard (optional):** every run rewrites `docs/index.html` (niche ranking, latest clips, counts). To see it online:
+   Settings → Pages → Deploy from a branch → `main` / `/docs`.
+
 ## If something fails
 
 | Message | Meaning and fix |

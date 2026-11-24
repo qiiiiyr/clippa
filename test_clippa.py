@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 import clippa
+import dashboard
 
 # peaks: highest first, never two inside one moment
 heat = [{"start_time": t, "end_time": t + 10, "value": v} for t, v in [(0, .1), (100, 1), (110, .9), (500, .8)]]
@@ -41,5 +42,11 @@ with tempfile.TemporaryDirectory() as tmp:
                             "-of", "csv=p=0", work / "out.mp4"], capture_output=True, text=True).stdout.strip()
     assert probe == "1080,1920", probe
     assert 5.9 < clippa.duration(work / "out.mp4") < 6.2
+
+# dashboard: titles are escaped, only https links become buttons, empty data still renders
+page = dashboard.build({"date": "d", "niches": [{"name": "A<b>", "views": 5, "top": [{"title": "t", "views": 5}]}]},
+                       [{"keep": True, "title": "<script>x</script>", "date": "d", "youtube": 'javascript:"'}])
+assert "<script>x" not in page and "A&lt;b&gt;" in page and "javascript" not in page.split("<tr>", 2)[-1].split("href")[0]
+assert "No scan yet" in dashboard.build({}, [])
 
 print("ok")
