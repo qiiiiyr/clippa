@@ -1,0 +1,403 @@
+"""Clippa: scan which clip niches get the most views, then cut, edit and upload new clips from Twitch and YouTube streams.
+
+    python clippa.py          # DRY_RUN is on unless DRY_RUN=false: renders to out/ and uploads nothing
+
+Steps: 1. scan the top clips of the biggest Twitch categories on Twitch and YouTube Shorts and rank the niches by views,
+2. find highlight moments in the streams of the channels in sources.json (Twitch clips viewers made, YouTube
+"most replayed" peaks), hottest niche first, 3. cut each moment, transcribe it, let Claude pick the exact clip and
+write the title using the niche's top clips as inspiration, render a captioned 9:16 video, 4. upload to YouTube Shorts
+and Instagram Reels.
+"""
+import json
+import os
+import subprocess
+import tempfile
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import anthropic
+import requests
+import yt_dlp
+
+ROOT = Path(__file__).resolve().parent
+DATA, OUT = ROOT / "data", ROOT / "out"
+env = os.environ.get
+DRY_RUN = env("DRY_RUN", "true").lower() != "false"
+PRIVACY = env("PRIVACY") or "public"
+CLIPS_PER_RUN = int(env("CLIPS_PER_RUN") or 3)
+MIN_S, MAX_S = int(env("CLIP_MIN_SECONDS") or 15), int(env("CLIP_MAX_SECONDS") or 60)
+NICHES, SCAN_PAGES, PAD = 20, 5, 30  # categories scanned, 100-clip pages per category, seconds kept around a moment
+WEEK_AGO = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+GRAPH = "https://graph.facebook.com/v23.0"  # bump when Meta retires this version
+
+
+def ok(r):
+    """Raise with the response body, but never the query string (it can hold access tokens)."""
+    if not r.ok:
+        raise RuntimeError(f"{r.status_code} {r.url.split('?')[0]}: {r.text[:500]}")
+    return r
+
+
+def load(path, default):
+    return json.loads(path.read_text()) if path.exists() else default
+
+
+def save(path, data):
+    path.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
+
+
+# ---------- sources ----------
+
+def ydl(**opts):
+    """yt-dlp using Node (preinstalled on GitHub runners) for YouTube's JS checks, plus the optional YTDLP_COOKIES
+    secret (a cookies.txt export) for when YouTube asks the runner to sign in."""
+    if env("YTDLP_COOKIES"):
+        cookies = Path(tempfile.gettempdir()) / "clippa-cookies.txt"  # outside the repo so it is never committed
+        cookies.write_text(env("YTDLP_COOKIES"))
+        opts["cookiefile"] = str(cookies)
+    return yt_dlp.YoutubeDL({"quiet": True, "js_runtimes": {"node": {}, "deno": {}}, **opts})
+
+
+def twitch():
+    """GET helper for the Twitch Helix API with an app token."""
+    cid = env("TWITCH_CLIENT_ID")
+    tok = ok(requests.post("https://id.twitch.tv/oauth2/token", timeout=30, params={
+        "client_id": cid, "client_secret": env("TWITCH_CLIENT_SECRET"), "grant_type": "client_credentials"})).json()
+    headers = {"Client-Id": cid, "Authorization": "Bearer " + tok["access_token"]}
+    return lambda path, **p: ok(requests.get("https://api.twitch.tv/helix/" + path, headers=headers, params=p,
+                                             timeout=30)).json()
+
+
+def youtube_token():
+    return ok(requests.post("https://oauth2.googleapis.com/token", timeout=30, data={
+        "client_id": env("YT_CLIENT_ID"), "client_secret": env("YT_CLIENT_SECRET"),
+        "refresh_token": env("YT_REFRESH_TOKEN"), "grant_type": "refresh_token"})).json()["access_token"]
+
+
+def youtube(token, path, **p):
+    return ok(requests.get("https://www.googleapis.com/youtube/v3/" + path, params=p, timeout=30,
+                           headers={"Authorization": "Bearer " + token})).json()
+
+
+# ---------- 1. scan ----------
+
+def twitch_clips(tw, game_id):
+    """This week's clips of a category, most viewed first, up to SCAN_PAGES pages of 100."""
+    clips, cursor = [], None
+    for _ in range(SCAN_PAGES):
+        page = tw("clips", game_id=game_id, started_at=WEEK_AGO, first=100, after=cursor)
+        clips += page["data"]
+        cursor = page.get("pagination", {}).get("cursor")
+        if not cursor:
+            break
+    return clips
+
+
+def youtube_shorts(token, niche):
+    """This week's most viewed YouTube Shorts for a niche (search costs 100 of the 10,000 daily quota units)."""
+    found = youtube(token, "search", part="snippet", q=f"{niche} clips", type="video", videoDuration="short",
+                    order="viewCount", publishedAfter=WEEK_AGO, maxResults=25)["items"]
+    if not found:
+        return []
+    vids = youtube(token, "videos", part="snippet,statistics", id=",".join(i["id"]["videoId"] for i in found))
+    return [{"title": v["snippet"]["title"], "views": int(v["statistics"].get("viewCount", 0)), "on": "youtube"}
+            for v in vids["items"]]
+
+
+def scan(tw, yt_token):
+    """Rank the biggest Twitch categories (niches) by the total views of their top clips on Twitch and YouTube."""
+    niches = []
+    for g in tw("games/top", first=NICHES)["data"]:
+        clips = [{"title": c["title"], "views": c["view_count"], "seconds": c["duration"], "on": "twitch"}
+                 for c in twitch_clips(tw, g["id"])]
+        clips += youtube_shorts(yt_token, g["name"]) if yt_token else []
+        niches.append({"id": g["id"], "name": g["name"], "clips_scanned": len(clips),
+                       "views": sum(c["views"] for c in clips),
+                       "top": sorted(clips, key=lambda c: -c["views"])[:10]})
+        print(f"scanned {g['name']}: {len(clips)} clips, {niches[-1]['views']:,} views")
+    return sorted(niches, key=lambda n: -n["views"])
+
+
+# ---------- 2. find moments ----------
+
+def twitch_moments(tw, logins):
+    """Highlights viewers clipped this week on the allowed channels, located in the stream VOD when it exists."""
+    users = tw("users", login=logins)["data"] if logins else []
+    moments = []
+    for u in users:
+        for c in tw("clips", broadcaster_id=u["id"], started_at=WEEK_AGO, first=20)["data"]:
+            vod = c["video_id"] and c["vod_offset"] is not None
+            start = c["vod_offset"] if vod else 0
+            moments.append({"url": f"https://www.twitch.tv/videos/{c['video_id']}" if vod else c["url"],
+                            "start": start, "end": start + c["duration"], "game_id": c["game_id"],
+                            "views": c["view_count"], "channel": c["broadcaster_name"], "title": c["title"]})
+    return moments
+
+
+def peaks(heatmap, n=2, half=45):
+    """Centres and values of the n most replayed heatmap segments that are at least a moment apart."""
+    picked = []
+    for seg in sorted(heatmap, key=lambda s: -s["value"]):
+        mid = (seg["start_time"] + seg["end_time"]) / 2
+        if all(abs(mid - p) > 2 * half for p, _ in picked):
+            picked.append((mid, seg["value"]))
+        if len(picked) == n:
+            break
+    return picked
+
+
+def youtube_moments(handles, half=45):
+    """The most replayed parts of the last 3 finished live streams of the allowed YouTube channels."""
+    moments = []
+    # ignoreerrors: a blocked, upcoming or members-only video comes back as None and only that video is skipped
+    with ydl(extract_flat=True, playlistend=3, ignoreerrors=True) as flat, ydl(ignoreerrors=True) as full:
+        for h in handles:
+            tab = flat.extract_info(f"https://www.youtube.com/{h}/streams", download=False) or {}
+            for e in tab.get("entries") or []:
+                info = e and full.extract_info(e["url"], download=False)
+                if not info or info.get("live_status") != "was_live":
+                    continue
+                for mid, value in peaks(info.get("heatmap") or [], half=half):
+                    moments.append({"url": info["webpage_url"], "start": max(0, mid - half), "end": mid + half,
+                                    "views": int(value * (info.get("view_count") or 0)), "channel": info["channel"],
+                                    "title": " ".join([info["title"], *(info.get("tags") or [])])})
+    return moments
+
+
+def rank(moments, niches):
+    """Tag each moment with its niche and order: most viewed niche first, then the moment's own views."""
+    order = {n["id"]: i for i, n in enumerate(niches)}
+    for m in moments:
+        m["niche"] = m.get("game_id") if m.get("game_id") in order else next(
+            (n["id"] for n in niches if n["name"].lower() in m["title"].lower()), None)
+    return sorted(moments, key=lambda m: (order.get(m["niche"], len(order)), -m["views"]))
+
+
+def seen_before(m, seen):
+    """True when the same part of the same stream was already clipped (viewers often clip one moment many times)."""
+    return any(s["url"] == m["url"] and abs(s["start"] - m["start"]) < 90 for s in seen)
+
+
+# ---------- 3. clip and edit ----------
+
+def download(m, work):
+    s = max(0, m["start"] - PAD)
+    with ydl(format="bv*[height<=1080]+ba/b", merge_output_format="mp4", outtmpl=str(work / "src.%(ext)s"),
+             download_ranges=yt_dlp.utils.download_range_func(None, [(s, m["end"] + PAD)])) as y:
+        y.download([m["url"]])
+    return next(work.glob("src.*")), m["start"] - s
+
+
+def duration(path):
+    return float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                 path], capture_output=True, text=True, check=True).stdout)
+
+
+def transcribe(src, work):
+    mp3 = work / "audio.mp3"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", src, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k",
+                    mp3], check=True)
+    with open(mp3, "rb") as f:
+        r = ok(requests.post("https://api.openai.com/v1/audio/transcriptions", timeout=300, files={"file": f},
+                             headers={"Authorization": "Bearer " + env("OPENAI_API_KEY", "")},
+                             data={"model": env("WHISPER_MODEL") or "whisper-1", "response_format": "verbose_json",
+                                   "timestamp_granularities[]": "word"}))
+    return r.json().get("words") or []
+
+
+PICK_SCHEMA = {"type": "object", "additionalProperties": False,
+               "required": ["keep", "start", "end", "title", "description", "hashtags"],
+               "properties": {"keep": {"type": "boolean"}, "start": {"type": "number"}, "end": {"type": "number"},
+                              "title": {"type": "string"}, "description": {"type": "string"},
+                              "hashtags": {"type": "array", "items": {"type": "string"}}}}
+
+
+def pick(m, niche, words, marked_at, length):
+    """Claude chooses the clip boundaries and writes the post, inspired by the niche's most viewed clips."""
+    inspo = "\n".join(f'- "{c["title"]}" ({c["views"]:,} views on {c["on"]})' for c in (niche or {}).get("top", []))
+    prompt = f"""You cut short vertical clips (YouTube Shorts, Instagram Reels) from livestreams.
+Stream: "{m['title']}" by {m['channel']}. This excerpt is {length:.0f} s long; viewers marked a highlight at about \
+{marked_at:.0f}-{marked_at + m['end'] - m['start']:.0f} s.
+Niche: {(niche or {}).get('name', 'unknown')}. The most viewed clips in this niche this week, as inspiration for which \
+moments and titles work:
+{inspo or '- none found'}
+
+Transcript, each word after its start time in seconds:
+{' '.join(f"[{w['start']:.1f}]{w['word']}" for w in words) or '(no speech)'}
+
+Pick one {MIN_S}-{MAX_S} second clip that opens on a hook within the first 2 seconds, ends right after the payoff, and \
+makes sense with no context. If there is no speech, keep the marked highlight. Write a short, punchy title in the style \
+of the examples (never promise something the clip does not show), a one-line description and 3-5 hashtags. Set keep to \
+false if nothing here would work as a standalone clip."""
+    client = anthropic.Anthropic()
+    with client.beta.messages.stream(
+            model=env("CLIP_MODEL") or "claude-opus-5-5", max_tokens=64000,
+            betas=["server-side-fallback-2026-07-01"], fallbacks="default",
+            output_config={"effort": env("CLIP_EFFORT") or "xhigh",
+                           "format": {"type": "json_schema", "schema": PICK_SCHEMA}},
+            messages=[{"role": "user", "content": prompt}]) as stream:
+        r = stream.get_final_message()
+    if r.stop_reason != "end_turn":
+        raise RuntimeError(f"Claude stopped with {r.stop_reason}")
+    return json.loads(next(b.text for b in r.content if b.type == "text"))
+
+
+def clamp(start, end, length):
+    """Fit model-chosen boundaries inside the file and the MIN_S-MAX_S length."""
+    start = min(max(0.0, start), max(0.0, length - MIN_S))
+    end = min(max(end, start + MIN_S), start + MAX_S, length)
+    return start, end
+
+
+def ts(t):
+    return f"{int(t // 3600)}:{int(t % 3600 // 60):02}:{t % 60:05.2f}"
+
+
+def captions(words, start, end, per=3):
+    """ASS subtitles: the words inside the clip, `per` at a time, timed from the clip start."""
+    words = [w for w in words if start <= w["start"] < end]
+    lines = []
+    for i in range(0, len(words), per):
+        g = words[i:i + per]
+        stop = min(words[i + per]["start"] if i + per < len(words) else end, g[-1]["end"] + 0.5, end)
+        text = " ".join(w["word"].strip() for w in g).upper().replace("{", "(").replace("}", ")")
+        lines.append(f"Dialogue: 0,{ts(g[0]['start'] - start)},{ts(stop - start)},Default,,0,0,0,,{text}")
+    return """[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, \
+StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,DejaVu Sans,84,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,0,2,60,60,460,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+""" + "\n".join(lines) + "\n"
+
+
+def render(src, start, end, words, work, out):
+    """9:16: the stream full width in the middle over a blurred copy, burned-in captions, loudness at -14 LUFS."""
+    (work / "caps.ass").write_text(captions(words, start, end))
+    graph = ("[0:v]split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20:2[bg];"
+             "[b]scale=1080:-2[fg];[bg][fg]overlay=0:(H-h)/2,ass=caps.ass[v]")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{start:.2f}", "-t", f"{end - start:.2f}",
+                    "-i", Path(src).resolve(), "-filter_complex", graph, "-map", "[v]", "-map", "0:a:0?",
+                    "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", Path(out).resolve()],
+                   check=True, cwd=work)
+
+
+# ---------- 4. upload ----------
+
+def upload_youtube(token, path, title, description, tags):
+    meta = {"snippet": {"title": title.replace("<", "").replace(">", "")[:100], "description": description,
+                        "tags": tags, "categoryId": "20"},
+            "status": {"privacyStatus": PRIVACY, "selfDeclaredMadeForKids": False}}
+    auth = {"Authorization": "Bearer " + token}
+    session = ok(requests.post("https://www.googleapis.com/upload/youtube/v3/videos", json=meta, timeout=60,
+                               params={"uploadType": "resumable", "part": "snippet,status"},
+                               headers={**auth, "X-Upload-Content-Type": "video/mp4"}))
+    with open(path, "rb") as f:
+        video = ok(requests.put(session.headers["Location"], data=f, timeout=600,
+                                headers={**auth, "Content-Type": "video/mp4"})).json()
+    return "https://youtube.com/shorts/" + video["id"]
+
+
+def upload_instagram(path, caption):
+    uid, tok = env("IG_USER_ID"), env("IG_TOKEN")
+    box = ok(requests.post(f"{GRAPH}/{uid}/media", timeout=60, data={
+        "media_type": "REELS", "upload_type": "resumable", "caption": caption, "access_token": tok})).json()["id"]
+    with open(path, "rb") as f:
+        ok(requests.post(f"https://rupload.facebook.com/ig-api-upload/{GRAPH.rsplit('/', 1)[1]}/{box}", data=f,
+                         timeout=600, headers={"Authorization": "OAuth " + tok, "offset": "0",
+                                               "file_size": str(Path(path).stat().st_size)}))
+    for _ in range(60):
+        status = ok(requests.get(f"{GRAPH}/{box}", timeout=30,
+                                 params={"fields": "status_code", "access_token": tok})).json()["status_code"]
+        if status == "FINISHED":
+            break
+        if status == "ERROR":
+            raise RuntimeError("Instagram could not process the video")
+        time.sleep(10)
+    else:
+        raise TimeoutError("Instagram still processing after 10 minutes")
+    media = ok(requests.post(f"{GRAPH}/{uid}/media_publish", timeout=60,
+                             data={"creation_id": box, "access_token": tok})).json()["id"]
+    return ok(requests.get(f"{GRAPH}/{media}", timeout=30,
+                           params={"fields": "permalink", "access_token": tok})).json()["permalink"]
+
+
+# ---------- run ----------
+
+def make_clip(m, niche, yt_token):
+    """Cut, edit and (unless dry run) upload one moment. Returns what to remember about it."""
+    channel = "".join(c if c.isalnum() else "_" for c in m["channel"])
+    name = f"{datetime.now(timezone.utc):%Y%m%d}-{channel}-{int(m['start'])}"
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp)
+        src, marked_at = download(m, work)
+        length = duration(src)
+        words = transcribe(src, work)
+        p = pick(m, niche, words, marked_at, length)
+        record = {"url": m["url"], "start": m["start"], "niche": (niche or {}).get("name"), "keep": p["keep"],
+                  "title": p["title"], "date": f"{datetime.now(timezone.utc):%Y-%m-%d}"}
+        if not p["keep"]:
+            print(f"  Claude skipped it: {p['title']}")
+            return record
+        start, end = clamp(p["start"], p["end"], length)
+        out = OUT / f"{name}.mp4"
+        render(src, start, end, words, work, out)
+    tags = [t.lstrip("#").replace(" ", "") for t in p["hashtags"]]
+    caption = f"{p['description']}\n\nCredit: {m['channel']} ({m['url']})\n" + " ".join("#" + t for t in tags)
+    save(OUT / f"{name}.json", {**record, "clip": [start, end], "caption": caption})
+    print(f"  rendered {out.name} ({end - start:.0f} s): {p['title']}")
+    uploads = {"youtube": yt_token and (lambda: upload_youtube(yt_token, out, p["title"], caption + " #Shorts", tags)),
+               "instagram": env("IG_TOKEN") and (lambda: upload_instagram(out, f"{p['title']}\n\n{caption}"))}
+    for platform, upload in uploads.items():
+        if upload and not DRY_RUN:
+            try:  # keep going so a clip already on one platform is recorded and never posted twice
+                record[platform] = upload()
+            except Exception as e:
+                record[platform] = f"failed: {e}"
+            print(f"  {platform}: {record[platform]}")
+    return record
+
+
+def main():
+    DATA.mkdir(exist_ok=True)
+    OUT.mkdir(exist_ok=True)
+    sources = load(ROOT / "sources.json", {})
+    seen = load(DATA / "seen.json", [])
+    tw = twitch()
+    yt_token = youtube_token() if env("YT_REFRESH_TOKEN") else None
+
+    niches = scan(tw, yt_token)
+    save(DATA / "scan.json", {"date": f"{datetime.now(timezone.utc):%Y-%m-%d}", "niches": niches})
+    print("Most viewed niches:", ", ".join(f"{n['name']} ({n['views']:,})" for n in niches[:5]))
+
+    moments = rank(twitch_moments(tw, sources.get("twitch", [])) + youtube_moments(sources.get("youtube", [])), niches)
+    by_id = {n["id"]: n for n in niches}
+    done, made = list(seen), 0
+    for m in moments:
+        if made >= CLIPS_PER_RUN:
+            break
+        if seen_before(m, done):
+            continue
+        print(f"{m['channel']} @ {m['start']:.0f}s, niche {by_id.get(m['niche'], {}).get('name', 'other')}: {m['title'][:60]}")
+        try:
+            record = make_clip(m, by_id.get(m["niche"]), yt_token)
+        except Exception as e:  # one bad stream must not stop the run
+            print(f"  failed: {e}")
+            continue
+        done.append(record)
+        made += record["keep"]
+        if not DRY_RUN:
+            save(DATA / "seen.json", done)
+    print(f"{made} clip(s) {'rendered (dry run, nothing uploaded)' if DRY_RUN else 'posted'}; see out/")
+
+
+if __name__ == "__main__":
+    main()

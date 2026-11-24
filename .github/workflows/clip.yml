@@ -1,0 +1,60 @@
+name: clip
+on:
+  schedule:
+    - cron: "17 14 * * *" # daily; posts only when the repository variable POSTING is "on"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Render the clips only, upload nothing
+        type: boolean
+        default: true
+permissions:
+  contents: write
+concurrency: clip
+jobs:
+  clip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: sudo apt-get update -q && sudo apt-get install -yq ffmpeg fonts-dejavu-core
+      - run: pip install -r requirements.txt
+      - run: python test_clippa.py
+      - run: python clippa.py
+        env:
+          # format() keeps an unticked box as the string 'false' instead of falling through to POSTING
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.dry_run) || vars.POSTING != 'on' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_TOKEN: ${{ secrets.IG_TOKEN }}
+          YTDLP_COOKIES: ${{ secrets.YTDLP_COOKIES }}
+          CLIP_MODEL: ${{ vars.CLIP_MODEL }}
+          CLIP_EFFORT: ${{ vars.CLIP_EFFORT }}
+          WHISPER_MODEL: ${{ vars.WHISPER_MODEL }}
+          CLIP_MIN_SECONDS: ${{ vars.CLIP_MIN_SECONDS }}
+          CLIP_MAX_SECONDS: ${{ vars.CLIP_MAX_SECONDS }}
+          CLIPS_PER_RUN: ${{ vars.CLIPS_PER_RUN }}
+          PRIVACY: ${{ vars.PRIVACY }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: clips
+          path: out/
+          if-no-files-found: ignore
+      - name: Save the niche scan and the list of clipped moments
+        if: always() # also after a crash, so clips already posted are never posted again
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          git diff --cached --quiet || (git commit -qm "clip run: niche scan and clipped moments" && git push)
