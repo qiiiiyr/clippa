@@ -2,17 +2,15 @@
 
     python clippa.py          # DRY_RUN is on unless DRY_RUN=false: renders to out/ and uploads nothing
 
-Steps: 1. scan the top clips of the biggest Twitch categories on Twitch and YouTube Shorts and rank the niches by views,
+Steps: 1. scan this week's top clips of the biggest Twitch categories and rank the niches by views,
 2. find highlight moments in the streams of the channels in sources.json (Twitch clips viewers made, YouTube
 "most replayed" peaks), hottest niche first, 3. cut each moment, transcribe it, let Claude pick the exact clip and
-write the title using the niche's top clips as inspiration, render a captioned 9:16 video, 4. upload to YouTube Shorts
-and Instagram Reels.
+write the title using the niche's top clips as inspiration, render a captioned 9:16 video, 4. upload to YouTube Shorts.
 """
 import json
 import os
 import subprocess
 import tempfile
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -27,9 +25,8 @@ DRY_RUN = env("DRY_RUN", "true").lower() != "false"
 PRIVACY = env("PRIVACY") or "public"
 CLIPS_PER_RUN = int(env("CLIPS_PER_RUN") or 3)
 MIN_S, MAX_S = int(env("CLIP_MIN_SECONDS") or 15), int(env("CLIP_MAX_SECONDS") or 60)
-NICHES, SCAN_PAGES, PAD = 20, 5, 30  # categories scanned, 100-clip pages per category, seconds kept around a moment
+NICHES, PAD = 20, 30  # categories scanned (top 100 clips each), seconds kept around a moment
 WEEK_AGO = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
-GRAPH = "https://graph.facebook.com/v23.0"  # bump when Meta retires this version
 
 
 def ok(r):
@@ -75,43 +72,14 @@ def youtube_token():
         "refresh_token": env("YT_REFRESH_TOKEN"), "grant_type": "refresh_token"})).json()["access_token"]
 
 
-def youtube(token, path, **p):
-    return ok(requests.get("https://www.googleapis.com/youtube/v3/" + path, params=p, timeout=30,
-                           headers={"Authorization": "Bearer " + token})).json()
-
-
 # ---------- 1. scan ----------
 
-def twitch_clips(tw, game_id):
-    """This week's clips of a category, most viewed first, up to SCAN_PAGES pages of 100."""
-    clips, cursor = [], None
-    for _ in range(SCAN_PAGES):
-        page = tw("clips", game_id=game_id, started_at=WEEK_AGO, first=100, after=cursor)
-        clips += page["data"]
-        cursor = page.get("pagination", {}).get("cursor")
-        if not cursor:
-            break
-    return clips
-
-
-def youtube_shorts(token, niche):
-    """This week's most viewed YouTube Shorts for a niche (search costs 100 of the 10,000 daily quota units)."""
-    found = youtube(token, "search", part="snippet", q=f"{niche} clips", type="video", videoDuration="short",
-                    order="viewCount", publishedAfter=WEEK_AGO, maxResults=25)["items"]
-    if not found:
-        return []
-    vids = youtube(token, "videos", part="snippet,statistics", id=",".join(i["id"]["videoId"] for i in found))
-    return [{"title": v["snippet"]["title"], "views": int(v["statistics"].get("viewCount", 0)), "on": "youtube"}
-            for v in vids["items"]]
-
-
-def scan(tw, yt_token):
-    """Rank the biggest Twitch categories (niches) by the total views of their top clips on Twitch and YouTube."""
+def scan(tw):
+    """Rank the biggest Twitch categories (niches) by the total views of their top 100 clips this week."""
     niches = []
     for g in tw("games/top", first=NICHES)["data"]:
-        clips = [{"title": c["title"], "views": c["view_count"], "seconds": c["duration"], "on": "twitch"}
-                 for c in twitch_clips(tw, g["id"])]
-        clips += youtube_shorts(yt_token, g["name"]) if yt_token else []
+        clips = [{"title": c["title"], "views": c["view_count"]}
+                 for c in tw("clips", game_id=g["id"], started_at=WEEK_AGO, first=100)["data"]]
         niches.append({"id": g["id"], "name": g["name"], "clips_scanned": len(clips),
                        "views": sum(c["views"] for c in clips),
                        "top": sorted(clips, key=lambda c: -c["views"])[:10]})
@@ -215,8 +183,8 @@ PICK_SCHEMA = {"type": "object", "additionalProperties": False,
 
 def pick(m, niche, words, marked_at, length):
     """Claude chooses the clip boundaries and writes the post, inspired by the niche's most viewed clips."""
-    inspo = "\n".join(f'- "{c["title"]}" ({c["views"]:,} views on {c["on"]})' for c in (niche or {}).get("top", []))
-    prompt = f"""You cut short vertical clips (YouTube Shorts, Instagram Reels) from livestreams.
+    inspo = "\n".join(f'- "{c["title"]}" ({c["views"]:,} views)' for c in (niche or {}).get("top", []))
+    prompt = f"""You cut short vertical clips (YouTube Shorts) from livestreams.
 Stream: "{m['title']}" by {m['channel']}. This excerpt is {length:.0f} s long; viewers marked a highlight at about \
 {marked_at:.0f}-{marked_at + m['end'] - m['start']:.0f} s.
 Niche: {(niche or {}).get('name', 'unknown')}. The most viewed clips in this niche this week, as inspiration for which \
@@ -306,30 +274,6 @@ def upload_youtube(token, path, title, description, tags):
     return "https://youtube.com/shorts/" + video["id"]
 
 
-def upload_instagram(path, caption):
-    uid, tok = env("IG_USER_ID"), env("IG_TOKEN")
-    box = ok(requests.post(f"{GRAPH}/{uid}/media", timeout=60, data={
-        "media_type": "REELS", "upload_type": "resumable", "caption": caption, "access_token": tok})).json()["id"]
-    with open(path, "rb") as f:
-        ok(requests.post(f"https://rupload.facebook.com/ig-api-upload/{GRAPH.rsplit('/', 1)[1]}/{box}", data=f,
-                         timeout=600, headers={"Authorization": "OAuth " + tok, "offset": "0",
-                                               "file_size": str(Path(path).stat().st_size)}))
-    for _ in range(60):
-        status = ok(requests.get(f"{GRAPH}/{box}", timeout=30,
-                                 params={"fields": "status_code", "access_token": tok})).json()["status_code"]
-        if status == "FINISHED":
-            break
-        if status == "ERROR":
-            raise RuntimeError("Instagram could not process the video")
-        time.sleep(10)
-    else:
-        raise TimeoutError("Instagram still processing after 10 minutes")
-    media = ok(requests.post(f"{GRAPH}/{uid}/media_publish", timeout=60,
-                             data={"creation_id": box, "access_token": tok})).json()["id"]
-    return ok(requests.get(f"{GRAPH}/{media}", timeout=30,
-                           params={"fields": "permalink", "access_token": tok})).json()["permalink"]
-
-
 # ---------- run ----------
 
 def make_clip(m, niche, yt_token):
@@ -354,15 +298,9 @@ def make_clip(m, niche, yt_token):
     caption = f"{p['description']}\n\nCredit: {m['channel']} ({m['url']})\n" + " ".join("#" + t for t in tags)
     save(OUT / f"{name}.json", {**record, "clip": [start, end], "caption": caption})
     print(f"  rendered {out.name} ({end - start:.0f} s): {p['title']}")
-    uploads = {"youtube": yt_token and (lambda: upload_youtube(yt_token, out, p["title"], caption + " #Shorts", tags)),
-               "instagram": env("IG_TOKEN") and (lambda: upload_instagram(out, f"{p['title']}\n\n{caption}"))}
-    for platform, upload in uploads.items():
-        if upload and not DRY_RUN:
-            try:  # keep going so a clip already on one platform is recorded and never posted twice
-                record[platform] = upload()
-            except Exception as e:
-                record[platform] = f"failed: {e}"
-            print(f"  {platform}: {record[platform]}")
+    if yt_token and not DRY_RUN:  # a failed upload raises, so the moment is not recorded and is retried next run
+        record["youtube"] = upload_youtube(yt_token, out, p["title"], caption + " #Shorts", tags)
+        print(f"  YouTube: {record['youtube']}")
     return record
 
 
@@ -374,7 +312,7 @@ def main():
     tw = twitch()
     yt_token = youtube_token() if env("YT_REFRESH_TOKEN") else None
 
-    niches = scan(tw, yt_token)
+    niches = scan(tw)
     save(DATA / "scan.json", {"date": f"{datetime.now(timezone.utc):%Y-%m-%d}", "niches": niches})
     print("Most viewed niches:", ", ".join(f"{n['name']} ({n['views']:,})" for n in niches[:5]))
 

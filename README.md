@@ -1,7 +1,7 @@
 # clippa
 
-Clipping bot: scans which clip niches get the most views on Twitch and YouTube, then cuts, edits (9:16, captions)
-and uploads new clips from the Twitch and YouTube streams in `sources.json` to YouTube Shorts and Instagram Reels.
+Clipping bot: scans which Twitch clip niches get the most views, then cuts, edits (9:16, captions)
+and uploads new clips from the Twitch and YouTube streams in `sources.json` to YouTube Shorts.
 
 - Setup: [docs/SETUP.md](docs/SETUP.md)
 - How it works: [docs/PLAN.md](docs/PLAN.md)

@@ -10,10 +10,8 @@ secrets**), never into a chat or a screenshot.
 |---|---|---|
 | 1. AI keys | highlight picking, titles, transcription | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` |
 | 2. Sources | niche scan and where clips are cut from | `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, optional `YTDLP_COOKIES` |
-| 3. YouTube (Shorts) | upload and the YouTube side of the scan | `YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_REFRESH_TOKEN` |
-| 4. Instagram (Reels) | upload and stats | `IG_USER_ID`, `IG_TOKEN` |
-| 5. TikTok (optional, later) | upload | `TT_CLIENT_KEY`, `TT_CLIENT_SECRET`, `TT_REFRESH_TOKEN` |
-| 6. GitHub settings and tests | switch it on | variables `POSTING`, `PRIVACY` |
+| 3. YouTube (Shorts) | upload | `YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_REFRESH_TOKEN` |
+| 4. GitHub settings and tests | switch it on | variables `POSTING`, `PRIVACY` |
 
 ## 1. AI keys
 
@@ -28,7 +26,7 @@ secrets**), never into a chat or a screenshot.
 
 - **Twitch:** <https://dev.twitch.tv/console> → Register Your Application (category "Application Integration",
   redirect `http://localhost`) → copy the Client ID and a new Client Secret into `TWITCH_CLIENT_ID` and
-  `TWITCH_CLIENT_SECRET`. Needed for every run: the niche scan reads the top clips of the 20 biggest Twitch categories.
+  `TWITCH_CLIENT_SECRET`. Needed for every run: the niche scan reads the top 100 clips of the week in each of the 20 biggest Twitch categories.
 - **`sources.json`:** the channels clips are cut from: `"twitch"` takes channel logins (`"xqc"`), `"youtube"` takes
   @handles (`"@somechannel"`). The bot cuts the moments viewers clipped on Twitch and the "most replayed" parts of
   YouTube streams, hottest niche from the scan first.
@@ -49,31 +47,20 @@ secrets**), never into a chat or a screenshot.
    `https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly`
    → authorize with the clips channel → exchange the code → copy the **refresh token** into `YT_REFRESH_TOKEN`.
 5. New API projects may be forced to private until YouTube audits them: <https://support.google.com/youtube/contact/yt_api_form>.
-6. Quota: 10,000 units a day. The scan uses about 2,000 (20 searches), each upload about 1,600, so keep
-   `CLIPS_PER_RUN` at 4 or less. Without `YT_REFRESH_TOKEN` the bot scans Twitch only and skips YouTube uploads.
+6. Quota: 10,000 units a day and each upload costs about 1,600, so keep `CLIPS_PER_RUN` at 6 or less. Without
+   `YT_REFRESH_TOKEN` the bot still scans and renders clips but uploads nothing.
 
-## 4. Instagram (Reels)
-
-1. Make the Instagram account a **Creator** account (Settings and privacy → Account type and tools) and link it to a
-   Facebook Page (Edit profile → Page).
-2. <https://developers.facebook.com> → Create app (use case "Manage messaging & content on Instagram"), keep it in
-   Development mode.
-3. Graph API Explorer: user token with `instagram_basic`, `instagram_content_publish`, `instagram_manage_insights`,
-   `pages_show_list`, `pages_read_engagement`, `business_management` → make it long-lived in the Access Token Debugger →
-   `GET me/accounts` gives the Page token (never expires). Save it as `IG_TOKEN`.
-4. `GET <page id>?fields=instagram_business_account` → the `id` is `IG_USER_ID`.
-
-## 5. TikTok (optional, later)
+## Later: TikTok and Instagram
 
 Register an app at <https://developers.tiktok.com>, add the Content Posting API, and complete its audit. Until the audit
-passes, uploads are private only, so start with YouTube and Instagram.
+passes, uploads are private only, so start with YouTube.
 
-## 6. GitHub settings and tests
+## 4. GitHub settings and tests
 
 1. Settings → General → `main` is the default branch.
 2. Settings → Actions → General → Workflow permissions **Read and write**, and tick "Allow GitHub Actions to create
    and approve pull requests".
-3. Add the secrets from parts 1-4.
+3. Add the secrets from parts 1-3.
 4. **Dry run:** add channels to `sources.json`, then Actions → **clip** → Run workflow with dry run ticked. The log
    shows the most viewed niches; `data/scan.json` (committed by the run) has the full ranking and each niche's top
    clips. Download the **clips** artifact: one `.mp4` and `.json` per clip. Check captions, crop and the first 3 seconds.
@@ -88,6 +75,4 @@ passes, uploads are private only, so start with YouTube and Instagram.
 | `Sign in to confirm you're not a bot` (yt-dlp) | YouTube blocked the runner. Add the `YTDLP_COOKIES` secret (part 2) or use a self-hosted runner. |
 | `0 clip(s)` | No new moments: add channels to `sources.json`, or their VODs are subscriber-only. |
 | `invalid_grant` (YouTube) | Refresh token expired. Publish the app, then redo the token. |
-| Instagram `code 190` | Token expired. Redo part 4 step 3. |
-| Instagram `code 100` | Wrong user ID or wrong Page. Redo part 4 step 4. |
 | Claude `429` or spend limit | Raise the limit in the Anthropic console or lower `CLIP_EFFORT`. |
