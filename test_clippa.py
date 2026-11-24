@@ -49,4 +49,8 @@ page = dashboard.build({"date": "d", "niches": [{"name": "A<b>", "views": 5, "to
 assert "<script>x" not in page and "A&lt;b&gt;" in page and "javascript" not in page.split("<tr>", 2)[-1].split("href")[0]
 assert "No scan yet" in dashboard.build({}, [])
 
+# free_pick: no Claude key keeps the marked moment, source title and a niche hashtag
+fp = clippa.free_pick({"start": 100, "end": 120, "title": "wow"}, {"name": "Grand Theft Auto V"}, 30)
+assert fp == {"keep": True, "start": 30, "end": 50, "title": "wow", "description": "", "hashtags": ["GrandTheftAutoV", "shorts"]}
+
 print("ok")

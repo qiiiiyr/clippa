@@ -8,16 +8,20 @@ secrets**), never into a chat or a screenshot.
 
 | Part | What you get | Secrets |
 |---|---|---|
-| 1. AI keys | highlight picking, titles, transcription | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` |
+| 1. AI keys (optional) | better cuts and titles, faster captions | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` |
 | 2. Sources | niche scan and where clips are cut from | `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, optional `YTDLP_COOKIES` |
 | 3. YouTube (Shorts) | upload | `YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_REFRESH_TOKEN` |
 | 4. GitHub settings and tests | switch it on | variables `POSTING`, `PRIVACY` |
 
-## 1. AI keys
+## 1. AI keys (optional: skip for the free version)
 
-1. Claude: <https://console.anthropic.com> → API Keys → create a key for this bot only, add a small credit and set a
-   monthly spend limit. Save as `ANTHROPIC_API_KEY`.
-2. Transcription (Whisper): <https://platform.openai.com> → API keys → create one. Save as `OPENAI_API_KEY`.
+Both keys are optional. With neither, the bot is free: it keeps the moment viewers clipped, uses the source's own title
+plus the niche as a hashtag, and makes captions with open-source Whisper on the GitHub machine (slower, a little less
+accurate). Add a key later to upgrade that step.
+
+1. Claude (better cuts and titles): <https://console.anthropic.com> → API Keys → create a key for this bot only, add a
+   small credit and set a monthly spend limit. Save as `ANTHROPIC_API_KEY`.
+2. Transcription (faster, more accurate captions): <https://platform.openai.com> → API keys. Save as `OPENAI_API_KEY`.
 3. Optional repository **variables** (not secrets); the defaults are shown: `CLIP_MODEL=claude-opus-5-5`,
    `CLIP_EFFORT=xhigh` (one call per clip picks the cut and writes title, description and hashtags),
    `WHISPER_MODEL=whisper-1`, `CLIP_MIN_SECONDS=15`, `CLIP_MAX_SECONDS=60`, `CLIPS_PER_RUN=3`.
@@ -60,7 +64,7 @@ passes, uploads are private only, so start with YouTube.
 1. Settings → General → `main` is the default branch.
 2. Settings → Actions → General → Workflow permissions **Read and write**, and tick "Allow GitHub Actions to create
    and approve pull requests".
-3. Add the secrets from parts 1-3.
+3. Add the secrets from parts 1-3 (part 1 is optional).
 4. **Dry run:** add channels to `sources.json`, then Actions → **clip** → Run workflow with dry run ticked. The log
    shows the most viewed niches; `data/scan.json` (committed by the run) has the full ranking and each niche's top
    clips. Download the **clips** artifact: one `.mp4` and `.json` per clip. Check captions, crop and the first 3 seconds.
