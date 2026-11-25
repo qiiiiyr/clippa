@@ -1,7 +1,5 @@
-"""Builds docs/index.html (one self-contained page, no JavaScript) from data/scan.json and data/seen.json."""
-import json
+"""Builds docs/index.html (one self-contained page, no JavaScript) from the niche scan and the clipped moments."""
 from html import escape as e
-from pathlib import Path
 
 CSS = """
 :root{--bg:#f6f7fb;--card:#fff;--ink:#14161f;--mute:#6b7185;--line:#e6e8f0;--a:#7c5cff;--b:#22d3ee;--ok:#16a34a}
@@ -59,7 +57,6 @@ def build(scan, seen):
 <section class="card"><h2>Latest clips</h2>{table}</section></div></main></body></html>"""
 
 
-def write(data_dir, out):
-    load = lambda name, default: json.loads((data_dir / name).read_text()) if (data_dir / name).exists() else default
+def write(scan, seen, out):
     out.parent.mkdir(exist_ok=True)
-    out.write_text(build(load("scan.json", {}), load("seen.json", [])))
+    out.write_text(build(scan, seen))
