@@ -7,8 +7,10 @@ Steps: 1. scan this week's top clips of the biggest Twitch categories and rank t
 "most replayed" peaks), hottest niche first, 3. cut each moment, transcribe it, let Claude pick the exact clip and
 write the title using the niche's top clips as inspiration, render a captioned 9:16 video, 4. upload to YouTube Shorts.
 """
+import functools
 import json
 import os
+import re
 import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -140,7 +142,7 @@ def youtube_moments(handles, half=45):
                 for mid, value in peaks(info.get("heatmap") or [], half=half):
                     moments.append({"url": info["webpage_url"], "start": max(0, mid - half), "end": mid + half,
                                     "views": int(value * (info.get("view_count") or 0)), "channel": info["channel"],
-                                    "title": " ".join([info["title"], *(info.get("tags") or [])])})
+                                    "title": info["title"], "tags": info.get("tags") or []})
     return moments
 
 
@@ -148,8 +150,9 @@ def rank(moments, niches):
     """Tag each moment with its niche and order: most viewed niche first, then the moment's own views."""
     order = {n["id"]: i for i, n in enumerate(niches)}
     for m in moments:
+        text = " ".join([m["title"], *m.get("tags", [])])
         m["niche"] = m.get("game_id") if m.get("game_id") in order else next(
-            (n["id"] for n in niches if n["name"].lower() in m["title"].lower()), None)
+            (n["id"] for n in niches if re.search(rf"\b{re.escape(n['name'])}\b", text, re.I)), None)
     return sorted(moments, key=lambda m: (order.get(m["niche"], len(order)), -m["views"]))
 
 
@@ -173,10 +176,15 @@ def duration(path):
                                  path], capture_output=True, text=True, check=True).stdout)
 
 
+@functools.cache
+def whisper():
+    from faster_whisper import WhisperModel
+    return WhisperModel("base", compute_type="int8")
+
+
 def transcribe_local(src):
     """Free captions: open-source Whisper on the runner's CPU, used when there is no OPENAI_API_KEY."""
-    from faster_whisper import WhisperModel
-    segments, _ = WhisperModel("base", compute_type="int8").transcribe(str(src), word_timestamps=True)
+    segments, _ = whisper().transcribe(str(src), word_timestamps=True)
     return [{"word": w.word, "start": w.start, "end": w.end} for seg in segments for w in seg.words]
 
 
@@ -340,6 +348,8 @@ def main():
     seen = load(DATA / "seen.json", [])
     tw = twitch()
     yt_token = youtube_token() if env("YT_REFRESH_TOKEN") else None
+    if not DRY_RUN and not yt_token:  # else moments would be marked done without ever being uploaded
+        raise SystemExit("Posting is on but YT_REFRESH_TOKEN is missing; add it or turn POSTING off.")
 
     niches = scan(tw)
     save(DATA / "scan.json", {"date": f"{datetime.now(timezone.utc):%Y-%m-%d}", "niches": niches})
@@ -367,7 +377,7 @@ def main():
         made += record["keep"]
         if not DRY_RUN:
             save(DATA / "seen.json", done)
-    dashboard.write(DATA, ROOT / "docs" / "index.html")
+    dashboard.write(load(DATA / "scan.json", {}), load(DATA / "seen.json", []), ROOT / "docs" / "index.html")
     print(f"{made} clip(s) {'rendered (dry run, nothing uploaded)' if DRY_RUN else 'posted'}; see out/")
 
 

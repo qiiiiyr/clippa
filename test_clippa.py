@@ -15,6 +15,10 @@ niches = [{"id": "1", "name": "Minecraft"}, {"id": "2", "name": "Chess"}]
 moments = [{"title": "random", "views": 9e9}, {"title": "x", "game_id": "2", "views": 5},
            {"title": "MINECRAFT hardcore", "views": 1}]
 assert [m.get("niche") for m in clippa.rank(moments, niches)] == ["1", "2", None]
+# whole words only, tags count too: "Start" is not the niche "Art", a "chess" tag is the niche "Chess"
+art = [{"id": "3", "name": "Art"}, {"id": "2", "name": "Chess"}]
+assert [m["niche"] for m in clippa.rank([{"title": "Start of the week", "views": 1},
+                                         {"title": "Day 3", "tags": ["chess"], "views": 1}], art)] == ["2", None]
 
 # seen_before: same stream within 90 s counts as the same moment
 seen = [{"url": "a", "start": 100}]
@@ -57,5 +61,56 @@ assert clippa.top_channels(scanned, n=2) == ["a", "b"]
 # free_pick: no Claude key keeps the marked moment, source title and a niche hashtag
 fp = clippa.free_pick({"start": 100, "end": 120, "title": "wow"}, {"name": "Grand Theft Auto V"}, 30)
 assert fp == {"keep": True, "start": 30, "end": 50, "title": "wow", "description": "", "hashtags": ["GrandTheftAutoV", "shorts"]}
+
+# whole run with every service faked: hottest niche first, a re-clipped moment skipped, each post recorded once
+import json, shutil, tempfile
+tmp = Path(tempfile.mkdtemp())
+(tmp / "sources.json").write_text('{"twitch": ["a"], "youtube": ["@b"]}')
+clippa.ROOT, clippa.DATA, clippa.OUT, clippa.DRY_RUN = tmp, tmp / "data", tmp / "out", False
+
+
+def tw(path, **p):
+    if path == "games/top":
+        return {"data": [{"id": "1", "name": "Minecraft"}, {"id": "2", "name": "Chess"}]}
+    if path == "users":
+        return {"data": [{"id": "u1", "display_name": "B"}]}
+    if "game_id" in p:
+        return {"data": [{"title": "g", "view_count": 100 * int(p["game_id"]), "broadcaster_name": "B",
+                          "broadcaster_id": "u1"}]}
+    clip = {"video_id": "v1", "duration": 20, "game_id": "1", "broadcaster_name": "Strm er", "url": "c"}
+    return {"data": [{**clip, "vod_offset": 100, "view_count": 50, "title": "huge play"},
+                     {**clip, "vod_offset": 130, "view_count": 40, "title": "same moment"}]}
+
+
+def fake_download(m, work):
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=1280x720:rate=30",
+                    "-f", "lavfi", "-i", "sine", "-t", "60", work / "src.mp4"], check=True)
+    return work / "src.mp4", 30
+
+
+uploads = []
+clippa.twitch, clippa.youtube_token, clippa.download = lambda: tw, lambda: "tok", fake_download
+clippa.youtube_moments = lambda h: [{"url": "y", "start": 10, "end": 100, "views": 5, "channel": "Y",
+                                     "title": "Day 3", "tags": ["chess"]}]
+clippa.transcribe = lambda src, work: [{"word": "hey", "start": 31, "end": 31.4}]
+clippa.pick = lambda m, n, w, at, l: {"keep": True, "start": 28, "end": 50, "title": m["title"], "description": "d",
+                                      "hashtags": ["#mc", "fun times"]}
+clippa.upload_youtube = lambda *a: uploads.append(a) or "https://youtube.com/shorts/x"
+clippa.env = lambda k, d=None: {"YT_REFRESH_TOKEN": "r"}.get(k, d)
+clippa.main()
+seen = json.loads((tmp / "data/seen.json").read_text())
+assert [s["url"] for s in seen] == ["y", "https://www.twitch.tv/videos/v1"], seen
+assert all(s["youtube"].startswith("https") for s in seen) and len(uploads) == 2
+assert uploads[0][2] == "Day 3" and "Credit: Strm er" in uploads[1][3] and uploads[0][4] == ["mc", "funtimes"]
+assert "Day 3" in (tmp / "docs/index.html").read_text()
+
+# posting on without a YouTube login stops instead of marking moments done
+clippa.env = lambda k, d=None: d
+try:
+    clippa.main()
+    raise AssertionError("main() should refuse to post without YT_REFRESH_TOKEN")
+except SystemExit:
+    pass
+shutil.rmtree(tmp)
 
 print("ok")
