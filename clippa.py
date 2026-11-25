@@ -173,7 +173,16 @@ def duration(path):
                                  path], capture_output=True, text=True, check=True).stdout)
 
 
+def transcribe_local(src):
+    """Free captions: open-source Whisper on the runner's CPU, used when there is no OPENAI_API_KEY."""
+    from faster_whisper import WhisperModel
+    segments, _ = WhisperModel("base", compute_type="int8").transcribe(str(src), word_timestamps=True)
+    return [{"word": w.word, "start": w.start, "end": w.end} for seg in segments for w in seg.words]
+
+
 def transcribe(src, work):
+    if not env("OPENAI_API_KEY"):
+        return transcribe_local(src)
     mp3 = work / "audio.mp3"
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", src, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k",
                     mp3], check=True)
@@ -192,8 +201,17 @@ PICK_SCHEMA = {"type": "object", "additionalProperties": False,
                               "hashtags": {"type": "array", "items": {"type": "string"}}}}
 
 
+def free_pick(m, niche, marked_at):
+    """No Claude key: keep the moment viewers marked, the source's own title, and the niche as hashtag."""
+    tag = "".join(c for c in (niche or {}).get("name", "") if c.isalnum())
+    return {"keep": True, "start": marked_at, "end": marked_at + m["end"] - m["start"], "title": m["title"],
+            "description": "", "hashtags": [t for t in (tag, "shorts") if t]}
+
+
 def pick(m, niche, words, marked_at, length):
     """Claude chooses the clip boundaries and writes the post, inspired by the niche's most viewed clips."""
+    if not env("ANTHROPIC_API_KEY"):
+        return free_pick(m, niche, marked_at)
     inspo = "\n".join(f'- "{c["title"]}" ({c["views"]:,} views)' for c in (niche or {}).get("top", []))
     prompt = f"""You cut short vertical clips (YouTube Shorts) from livestreams.
 Stream: "{m['title']}" by {m['channel']}. This excerpt is {length:.0f} s long; viewers marked a highlight at about \

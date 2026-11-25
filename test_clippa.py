@@ -54,4 +54,8 @@ scanned = [{"top": [{"channel_id": "a", "views": 5}, {"channel_id": "b", "views"
            {"top": [{"channel_id": "a", "views": 4}, {"channel_id": "c", "views": 1}]}]
 assert clippa.top_channels(scanned, n=2) == ["a", "b"]
 
+# free_pick: no Claude key keeps the marked moment, source title and a niche hashtag
+fp = clippa.free_pick({"start": 100, "end": 120, "title": "wow"}, {"name": "Grand Theft Auto V"}, 30)
+assert fp == {"keep": True, "start": 30, "end": 50, "title": "wow", "description": "", "hashtags": ["GrandTheftAutoV", "shorts"]}
+
 print("ok")

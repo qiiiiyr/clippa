@@ -8,3 +8,6 @@ and uploads new clips from the Twitch and YouTube streams in `sources.json` to Y
 - How it works: [docs/PLAN.md](docs/PLAN.md)
 - Local run: `pip install -r requirements.txt`, set the secrets from SETUP as environment variables, `python clippa.py`
   (dry run unless `DRY_RUN=false`). Self-check: `python test_clippa.py`.
+
+Captions follow the language spoken in each clip (Whisper detects it), including Hindi and mixed Hindi/English. With no
+API keys the whole bot is free and can run on your own machine, with nothing uploaded anywhere except the finished clips.
