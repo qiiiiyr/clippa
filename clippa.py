@@ -127,15 +127,15 @@ def peaks(heatmap, n=2, half=45):
 
 
 def youtube_moments(handles, half=45):
-    """The most replayed parts of the last 3 finished live streams of the allowed YouTube channels."""
+    """The most replayed parts of the last 3 finished live streams and last 3 videos of the allowed YouTube channels."""
     moments = []
     # ignoreerrors: a blocked, upcoming or members-only video comes back as None and only that video is skipped
     with ydl(extract_flat=True, playlistend=3, ignoreerrors=True) as flat, ydl(ignoreerrors=True) as full:
-        for h in handles:
-            tab = flat.extract_info(f"https://www.youtube.com/{h}/streams", download=False) or {}
+        for h, kind in ((h, kind) for h in handles for kind in ("streams", "videos")):
+            tab = flat.extract_info(f"https://www.youtube.com/{h}/{kind}", download=False) or {}
             for e in tab.get("entries") or []:
                 info = e and full.extract_info(e["url"], download=False)
-                if not info or info.get("live_status") != "was_live":
+                if not info or info.get("live_status") not in ("was_live", "not_live"):  # skip live and upcoming
                     continue
                 for mid, value in peaks(info.get("heatmap") or [], half=half):
                     moments.append({"url": info["webpage_url"], "start": max(0, mid - half), "end": mid + half,

@@ -8,7 +8,7 @@ with a human approving every batch. Same shape as the Cutaway repo: GitHub Actio
 | Step | What | Tool | Model |
 |---|---|---|---|
 | 1. Scan niches | top 100 clips this week of each of the 20 biggest Twitch categories; niches ranked by total views, top 10 clips kept as inspiration (`data/scan.json`) | Twitch API | none |
-| 2. Find moments | in the `sources.json` channels: moments viewers clipped on Twitch (located in the VOD), "most replayed" peaks of YouTube streams; ordered hottest niche first, then views; moments already in `data/seen.json` skipped | Twitch API, `yt-dlp` | none |
+| 2. Find moments | in the `sources.json` channels: moments viewers clipped on Twitch (located in the VOD), "most replayed" peaks of the last 3 YouTube streams and last 3 videos; ordered hottest niche first, then views; moments already in `data/seen.json` skipped | Twitch API, `yt-dlp` | none |
 | 3. Download | only the moment plus 30 s each side | `yt-dlp` | none |
 | 4. Transcribe | word-level timestamps | OpenAI Whisper API | `whisper-1` |
 | 5. Pick and package | exact 15-60 s cut with a hook, title in the style of the niche's top clips, description, hashtags, or skip | Claude (structured output) | `claude-opus-5-5`, effort `xhigh` |
