@@ -2,3 +2,5 @@ anthropic>=2.13
 requests>=2.32
 yt-dlp[default]>=2026.11.23
 faster-whisper>=1.1
+# shortcut: faster-whisper 1.2.1 passes av.open(metadata_errors=...), removed in PyAV 19; drop when faster-whisper fixes it
+av<19

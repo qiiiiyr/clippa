@@ -46,6 +46,9 @@ with tempfile.TemporaryDirectory() as tmp:
                             "-of", "csv=p=0", work / "out.mp4"], capture_output=True, text=True).stdout.strip()
     assert probe == "1080,1920", probe
     assert 5.9 < clippa.duration(work / "out.mp4") < 6.2
+    # the free caption tool can read the audio (PyAV 19 broke this: every clip failed after downloading)
+    from faster_whisper.audio import decode_audio
+    assert len(decode_audio(str(work / "out.mp4"))) > 16000 * 5
 
 # dashboard: titles are escaped, only https links become buttons, empty data still renders
 page = dashboard.build({"date": "d", "niches": [{"name": "A<b>", "views": 5, "top": [{"title": "t", "views": 5}]}]},
