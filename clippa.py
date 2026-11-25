@@ -80,7 +80,8 @@ def scan(tw):
     """Rank the biggest Twitch categories (niches) by the total views of their top 100 clips this week."""
     niches = []
     for g in tw("games/top", first=NICHES)["data"]:
-        clips = [{"title": c["title"], "views": c["view_count"]}
+        clips = [{"title": c["title"], "views": c["view_count"], "channel": c["broadcaster_name"],
+                  "channel_id": c["broadcaster_id"]}
                  for c in tw("clips", game_id=g["id"], started_at=WEEK_AGO, first=100)["data"]]
         niches.append({"id": g["id"], "name": g["name"], "clips_scanned": len(clips),
                        "views": sum(c["views"] for c in clips),
@@ -91,9 +92,17 @@ def scan(tw):
 
 # ---------- 2. find moments ----------
 
-def twitch_moments(tw, logins):
-    """Highlights viewers clipped this week on the allowed channels, located in the stream VOD when it exists."""
-    users = tw("users", login=logins)["data"] if logins else []
+def top_channels(niches, n=3):
+    """Ids of the channels whose clips got the most views across all scanned niches."""
+    views = {}
+    for niche in niches:
+        for c in niche["top"]:
+            views[c["channel_id"]] = views.get(c["channel_id"], 0) + c["views"]
+    return sorted(views, key=lambda i: -views[i])[:n]
+
+
+def twitch_moments(tw, users):
+    """Highlights viewers clipped this week on these channels, located in the stream VOD when it exists."""
     moments = []
     for u in users:
         for c in tw("clips", broadcaster_id=u["id"], started_at=WEEK_AGO, first=20)["data"]:
@@ -164,7 +173,16 @@ def duration(path):
                                  path], capture_output=True, text=True, check=True).stdout)
 
 
+def transcribe_local(src):
+    """Free captions: open-source Whisper on the runner's CPU, used when there is no OPENAI_API_KEY."""
+    from faster_whisper import WhisperModel
+    segments, _ = WhisperModel("base", compute_type="int8").transcribe(str(src), word_timestamps=True)
+    return [{"word": w.word, "start": w.start, "end": w.end} for seg in segments for w in seg.words]
+
+
 def transcribe(src, work):
+    if not env("OPENAI_API_KEY"):
+        return transcribe_local(src)
     mp3 = work / "audio.mp3"
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", src, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k",
                     mp3], check=True)
@@ -183,8 +201,17 @@ PICK_SCHEMA = {"type": "object", "additionalProperties": False,
                               "hashtags": {"type": "array", "items": {"type": "string"}}}}
 
 
+def free_pick(m, niche, marked_at):
+    """No Claude key: keep the moment viewers marked, the source's own title, and the niche as hashtag."""
+    tag = "".join(c for c in (niche or {}).get("name", "") if c.isalnum())
+    return {"keep": True, "start": marked_at, "end": marked_at + m["end"] - m["start"], "title": m["title"],
+            "description": "", "hashtags": [t for t in (tag, "shorts") if t]}
+
+
 def pick(m, niche, words, marked_at, length):
     """Claude chooses the clip boundaries and writes the post, inspired by the niche's most viewed clips."""
+    if not env("ANTHROPIC_API_KEY"):
+        return free_pick(m, niche, marked_at)
     inspo = "\n".join(f'- "{c["title"]}" ({c["views"]:,} views)' for c in (niche or {}).get("top", []))
     prompt = f"""You cut short vertical clips (YouTube Shorts) from livestreams.
 Stream: "{m['title']}" by {m['channel']}. This excerpt is {length:.0f} s long; viewers marked a highlight at about \
@@ -318,7 +345,11 @@ def main():
     save(DATA / "scan.json", {"date": f"{datetime.now(timezone.utc):%Y-%m-%d}", "niches": niches})
     print("Most viewed niches:", ", ".join(f"{n['name']} ({n['views']:,})" for n in niches[:5]))
 
-    moments = rank(twitch_moments(tw, sources.get("twitch", [])) + youtube_moments(sources.get("youtube", [])), niches)
+    logins = sources.get("twitch", [])
+    # no channels listed: clip the most viewed channels from the scan (check they allow clipping)
+    users = tw("users", login=logins)["data"] if logins else tw("users", id=top_channels(niches))["data"]
+    print("Clipping Twitch channels:", ", ".join(u["display_name"] for u in users) or "none")
+    moments = rank(twitch_moments(tw, users) + youtube_moments(sources.get("youtube", [])), niches)
     by_id = {n["id"]: n for n in niches}
     done, made = list(seen), 0
     for m in moments:
