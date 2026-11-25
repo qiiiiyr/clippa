@@ -34,7 +34,7 @@ accurate). Add a key later to upgrade that step.
 - **`sources.json`:** the channels clips are cut from: `"twitch"` takes channel logins (`"xqc"`), `"youtube"` takes
   @handles (`"@somechannel"`). Leave `"twitch"` empty and the bot clips the 3 channels whose clips got the
   most views in that week's scan (the run log prints which). Check that they allow clipping. The bot cuts the moments viewers clipped on Twitch and the "most replayed" parts of
-  YouTube streams, hottest niche from the scan first.
+  YouTube streams and videos (the last 3 of each per channel), hottest niche from the scan first.
 - **YouTube downloads:** `yt-dlp`, no key. YouTube often blocks cloud machines with "Sign in to confirm you're not a
   bot". Fix: in a private browser window sign in with a spare Google account, export youtube.com cookies with a
   "cookies.txt" extension, and paste the whole file into the secret `YTDLP_COOKIES`.
