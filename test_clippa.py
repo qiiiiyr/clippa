@@ -49,4 +49,9 @@ page = dashboard.build({"date": "d", "niches": [{"name": "A<b>", "views": 5, "to
 assert "<script>x" not in page and "A&lt;b&gt;" in page and "javascript" not in page.split("<tr>", 2)[-1].split("href")[0]
 assert "No scan yet" in dashboard.build({}, [])
 
+# top_channels: summed across niches, most viewed first
+scanned = [{"top": [{"channel_id": "a", "views": 5}, {"channel_id": "b", "views": 7}]},
+           {"top": [{"channel_id": "a", "views": 4}, {"channel_id": "c", "views": 1}]}]
+assert clippa.top_channels(scanned, n=2) == ["a", "b"]
+
 print("ok")

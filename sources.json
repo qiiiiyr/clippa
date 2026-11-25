@@ -1,5 +1,5 @@
 {
-  "_note": "Only channels that allow clipping. twitch: channel logins. youtube: @handles. Clips are cut from their streams, hottest niche first.",
+  "_note": "Only channels that allow clipping. twitch: channel logins. youtube: @handles. Clips are cut from their streams, hottest niche first. Leave twitch empty to clip the 3 most viewed channels from the weekly scan.",
   "twitch": [],
   "youtube": []
 }

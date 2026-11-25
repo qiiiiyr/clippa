@@ -28,7 +28,8 @@ secrets**), never into a chat or a screenshot.
   redirect `http://localhost`) → copy the Client ID and a new Client Secret into `TWITCH_CLIENT_ID` and
   `TWITCH_CLIENT_SECRET`. Needed for every run: the niche scan reads the top 100 clips of the week in each of the 20 biggest Twitch categories.
 - **`sources.json`:** the channels clips are cut from: `"twitch"` takes channel logins (`"xqc"`), `"youtube"` takes
-  @handles (`"@somechannel"`). The bot cuts the moments viewers clipped on Twitch and the "most replayed" parts of
+  @handles (`"@somechannel"`). Leave `"twitch"` empty and the bot clips the 3 channels whose clips got the
+  most views in that week's scan (the run log prints which). Check that they allow clipping. The bot cuts the moments viewers clipped on Twitch and the "most replayed" parts of
   YouTube streams, hottest niche from the scan first.
 - **YouTube downloads:** `yt-dlp`, no key. YouTube often blocks cloud machines with "Sign in to confirm you're not a
   bot". Fix: in a private browser window sign in with a spare Google account, export youtube.com cookies with a
