@@ -172,8 +172,10 @@ def download(m, work):
 
 
 def duration(path):
-    return float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
-                                 path], capture_output=True, text=True, check=True).stdout)
+    """Length in seconds, or 0.0 when the file does not say (ffprobe prints N/A for some Twitch downloads)."""
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    return float(out) if out not in ("", "N/A") else 0.0
 
 
 @functools.cache
@@ -320,7 +322,7 @@ def make_clip(m, niche, yt_token):
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         src, marked_at = download(m, work)
-        length = duration(src)
+        length = duration(src) or marked_at + m["end"] - m["start"] + PAD  # unknown: the section we asked for
         words = transcribe(src, work)
         p = pick(m, niche, words, marked_at, length)
         record = {"url": m["url"], "start": m["start"], "niche": (niche or {}).get("name"), "keep": p["keep"],
