@@ -156,6 +156,16 @@ def rank(moments, niches):
     return sorted(moments, key=lambda m: (order.get(m["niche"], len(order)), -m["views"]))
 
 
+# titles that get Shorts age-restricted, limited or struck; matched as whole words, any case
+BLOCKED = re.compile(r"\b(nudes?|naked|nsfw|porn\w*|sex\w*|horny|boobs?|tits|titties|dick|pussy|onlyfans|rape|kys|"
+                     r"fuck\w*|(bull)?shit(s|ty)?|bitch\w*|n[i1]gg\w*|f[a4]gg?\w*|retard\w*)\b", re.I)
+
+
+def blocked(m):
+    """True when the moment's title, or the title written for it, has a word that should never be posted."""
+    return bool(BLOCKED.search(m["title"]))
+
+
 def seen_before(m, seen):
     """True when the same part of the same stream was already clipped (viewers often clip one moment many times)."""
     return any(s["url"] == m["url"] and abs(s["start"] - m["start"]) < 90 for s in seen)
@@ -327,8 +337,9 @@ def make_clip(m, niche, yt_token):
         p = pick(m, niche, words, marked_at, length)
         record = {"url": m["url"], "start": m["start"], "niche": (niche or {}).get("name"), "keep": p["keep"],
                   "title": p["title"], "date": f"{datetime.now(timezone.utc):%Y-%m-%d}"}
-        if not p["keep"]:
-            print(f"  Claude skipped it: {p['title']}")
+        if not p["keep"] or blocked(p):  # Claude's own title is checked too
+            print(f"  skipped: {p['title']}")
+            record["keep"] = False
             return record
         start, end = clamp(p["start"], p["end"], length)
         out = OUT / f"{name}.mp4"
@@ -368,6 +379,9 @@ def main():
         if made >= CLIPS_PER_RUN:
             break
         if seen_before(m, done):
+            continue
+        if blocked(m):
+            print(f"skipped (blocked word in title): {m['channel']} @ {m['start']:.0f}s")
             continue
         print(f"{m['channel']} @ {m['start']:.0f}s, niche {by_id.get(m['niche'], {}).get('name', 'other')}: {m['title'][:60]}")
         try:

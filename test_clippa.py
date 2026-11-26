@@ -26,6 +26,12 @@ assert clippa.seen_before({"url": "a", "start": 150}, seen)
 assert not clippa.seen_before({"url": "a", "start": 300}, seen)
 assert not clippa.seen_before({"url": "b", "start": 100}, seen)
 
+# blocklist: whole words in any case; normal words that contain them are fine
+for bad in ["nude", "NUDES lol", "ohne says GTA 6 beats porn", "Sexy dance", "what the fuck"]:
+    assert clippa.blocked({"title": bad}), bad
+for fine in ["MANDY WALKED IN", "Essex trip", "Dickens novel", "Scunthorpe", "shitake? no, shiitake"]:
+    assert not clippa.blocked({"title": fine}), fine
+
 # clamp: model boundaries forced into the file and into 15-60 s
 assert clippa.clamp(-5, 200, 120) == (0, 60)
 assert clippa.clamp(110, 112, 120) == (105, 120)
