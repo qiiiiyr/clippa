@@ -1,0 +1,28 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Clippa Privacy Policy</title><style>:root{--bg:#f6f7fb;--ink:#14161f;--mute:#6b7185;--a:#7c5cff}
+@media(prefers-color-scheme:dark){:root{--bg:#0b0d14;--ink:#eef0f7;--mute:#8d94ab}}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:720px;margin:0 auto;padding:32px 16px 64px}h1{margin-top:0}a{color:var(--a)}.mute{color:var(--mute)}</style></head><body><main>
+<h1>Privacy Policy</h1>
+<p>Clippa is a personal automation tool. It cuts short clips from public Twitch and YouTube streams and uploads them
+to its owner's own YouTube channel. It has no other users and no sign-up.</p>
+<h2>What Google data it uses</h2>
+<p>With the owner's permission, Clippa uses the YouTube Data API scope <code>youtube.upload</code> only to upload
+videos to the owner's own channel. It does not read, store or share any other Google account data, and it does not
+access anyone else's account.</p>
+<h2>How data is stored</h2>
+<p>The OAuth credentials are kept as encrypted GitHub Actions secrets in the owner's repository and are used only when
+the upload job runs. Clippa keeps a list of clips it has posted (title, source link, date, video link) in the same
+repository. Nothing is sold, shared with third parties, or used for advertising.</p>
+<h2>Public data it reads</h2>
+<p>To choose clips, Clippa reads public information from the Twitch and YouTube APIs: clip titles, view counts, channel
+names and public video segments. Every uploaded clip credits its source channel.</p>
+<h2>Removing access</h2>
+<p>The owner can revoke Clippa's access at any time at
+<a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.
+Clippa's use of information received from Google APIs follows the
+<a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>,
+including the Limited Use requirements.</p>
+<h2>Contact</h2>
+<p>Questions or removal requests: open an issue at
+<a href="https://github.com/qiiiiyr/clippa/issues">github.com/qiiiiyr/clippa/issues</a>.</p>
+<p class="mute">Last updated: 26 November 2026. <a href="./">Clippa</a> · <a href="privacy.html">Privacy</a> · <a href="terms.html">Terms</a></p></main></body></html>

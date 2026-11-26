@@ -1,6 +1,8 @@
-anthropic>=2.13
-requests>=2.32
+# exact versions so a new release cannot break the daily run (PyAV 19 broke every clip once); bump on purpose
+anthropic==2.13.0
+requests==2.34.2
+faster-whisper==1.2.1
+# faster-whisper 1.2.1 passes av.open(metadata_errors=...), removed in PyAV 19
+av==18.1.1
+# not pinned: yt-dlp must stay current to keep up with Twitch and YouTube changes
 yt-dlp[default]>=2026.11.23
-faster-whisper>=1.1
-# shortcut: faster-whisper 1.2.1 passes av.open(metadata_errors=...), removed in PyAV 19; drop when faster-whisper fixes it
-av<19
