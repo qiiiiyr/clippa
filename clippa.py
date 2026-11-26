@@ -175,7 +175,10 @@ def seen_before(m, seen):
 
 def download(m, work):
     s = max(0, m["start"] - PAD)
+    # a deleted or subscriber-only video stalled for 8 minutes in a real run: give up after 30 s without data
+    # (ffmpeg does the section download and takes its own timeout, in microseconds)
     with ydl(format="bv*[height<=1080]+ba/b", merge_output_format="mp4", outtmpl=str(work / "src.%(ext)s"),
+             socket_timeout=30, external_downloader_args={"ffmpeg_i": ["-rw_timeout", "30000000"]},
              download_ranges=yt_dlp.utils.download_range_func(None, [(s, m["end"] + PAD)])) as y:
         y.download([m["url"]])
     return next(work.glob("src.*")), m["start"] - s

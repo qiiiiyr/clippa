@@ -52,7 +52,7 @@ def build(scan, seen):
 <title>Clippa Dashboard</title><style>{CSS}</style></head><body><main>
 <header><h1>Clippa</h1><span class="mute">Last scan: {e(scan.get("date", "never"))}</span></header>
 <div class="kpis">{kpi(len(niches), "niches scanned")}{kpi(e(niches[0]["name"]) if niches else "-", "hottest niche this week")}
-{kpi(live, "clips on YouTube")}{kpi(skipped, "moments skipped by Claude")}</div>
+{kpi(live, "clips on YouTube")}{kpi(skipped, "moments skipped")}</div>
 <div class="grid"><section class="card"><h2>Most viewed niches</h2>{rows}</section>
 <section class="card"><h2>Latest clips</h2>{table}</section></div></main></body></html>"""
 
