@@ -45,7 +45,10 @@ accurate). Add a key later to upgrade that step.
 
 1. Sign in to YouTube and create the channel for the clips.
 2. <https://console.cloud.google.com> → new project → enable **YouTube Data API v3** and **YouTube Analytics API**.
-3. OAuth consent screen: External, fill the app name and links, then press **Publish app** (in "Testing" the login
+3. OAuth consent screen: External. Publishing needs three links on an authorised domain; turn on GitHub Pages
+   (Settings → Pages → `main` / `/docs`) and use: home page `https://qiiiiyr.github.io/clippa/`, privacy policy
+   `https://qiiiiyr.github.io/clippa/privacy.html`, terms `https://qiiiiyr.github.io/clippa/terms.html`, authorised
+   domain `qiiiiyr.github.io`. Then press **Publish app** (in "Testing" the login
    expires every 7 days). Credentials → OAuth client ID → Web application, redirect URI
    `https://developers.google.com/oauthplayground`. Save `YT_CLIENT_ID`, `YT_CLIENT_SECRET`.
 4. <https://developers.google.com/oauthplayground> → gear → "Use your own OAuth credentials" → scopes
