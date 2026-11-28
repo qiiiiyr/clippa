@@ -88,7 +88,8 @@ def tw(path, **p):
                           "broadcaster_id": "u1"}]}
     clip = {"video_id": "v1", "duration": 20, "game_id": "1", "broadcaster_name": "Strm er", "url": "c"}
     return {"data": [{**clip, "vod_offset": 100, "view_count": 50, "title": "huge play"},
-                     {**clip, "vod_offset": 130, "view_count": 40, "title": "same moment"}]}
+                     {**clip, "vod_offset": 130, "view_count": 40, "title": "same moment"},
+                     {**clip, "vod_offset": 900, "view_count": 30, "title": "nude"}]}
 
 
 def fake_download(m, work):
@@ -109,7 +110,7 @@ clippa.env = lambda k, d=None: {"YT_REFRESH_TOKEN": "r"}.get(k, d)
 clippa.main()
 seen = json.loads((tmp / "data/seen.json").read_text())
 assert [s["url"] for s in seen] == ["y", "https://www.twitch.tv/videos/v1"], seen
-assert all(s["youtube"].startswith("https") for s in seen) and len(uploads) == 2
+assert all(s["youtube"].startswith("https") for s in seen) and len(uploads) == 2  # "nude" was never downloaded
 assert uploads[0][2] == "Day 3" and "Credit: Strm er" in uploads[1][3] and uploads[0][4] == ["mc", "funtimes"]
 assert "Day 3" in (tmp / "docs/index.html").read_text()
 
